@@ -31,37 +31,17 @@ Stat :: union { Label, Call, Return, Print, RawPrint, Assign, StackOp, Goto, }
 
 // look ahead and ensure tokens are correct
 // these are helper funcs
-TokenStr :: ""; TokenInt :: 0
-ValidateTokens :: proc(tokens: ^[dynamic]Token, expected_tokens: [][]Token) -> (succ: bool) {
-    t: Token; ok: bool
-
-    for expected_union, i in expected_tokens {
+ValidateTokens :: proc(tokens: ^[dynamic]Token, expected: [][]TokenKind) -> (matches: int, succ: bool) {
+    for tuple, i in expected {
         succ = false
-        inner: for expected_token in expected_union {
-            if t, ok = tokens[i].(string); ok {
-                if t, ok = expected_token.(string); ok {
-                    succ = true
-                    break inner
-                }
-            }
-
-            if t, ok = tokens[i].(int); ok {
-                if t, ok = expected_token.(int); ok {
-                    succ = true
-                    break inner
-                }
-            }
-
-            if t, ok = tokens[i].(TokenKind); ok {
-                if t, ok = expected_token.(TokenKind); ok {
-                    if tokens[i].(TokenKind) == expected_token.(TokenKind) {
-                        succ = true
-                        break inner
-                    }
-                }
+        token := tokens[i]
+        inner: for match in tuple {
+            if token.kind == match { 
+                succ = true; break inner 
             }
         }
         if !succ do return
+        matches += 1
     }
     return
 }
@@ -69,16 +49,16 @@ ValidateTokens :: proc(tokens: ^[dynamic]Token, expected_tokens: [][]Token) -> (
 // these type casts on the unions were giving me problems,
 // anyways this is the highest form of print debugging, passing #caller_location and printing that
 // Odin is actually a goated programming language, though proper debuggers are still better
-GetString_OrInt :: proc(token: Token, loc := #caller_location) -> union{string, int} {
-    if str, ok := token.(string); ok { 
+GetTokenData :: proc(token: Token, loc := #caller_location) -> union{string, int} {
+    if str, ok := token.data.(string); ok { 
         return str 
     } else { 
-        if num, ok := token.(int); ok {
+        if num, ok := token.data.(int); ok {
             return num
         } else {
             fmt.println("string_or_int fail", loc)
-            panic := token.(int)
-            return 1
+            panic := token.data.(int)
+            return '?'
         }
     }
 }
@@ -88,153 +68,170 @@ DiscardTokens :: proc(tokens: ^[dynamic]Token, amount: int) {
 }
 
 // now time for parsing
-ParseLabel :: proc(tokens: ^[dynamic]Token) -> (label: Label, succ: bool) {
-    if succ = ValidateTokens(
+ParseLabel :: proc(tokens: ^[dynamic]Token) -> (Label, bool) {
+    if matches, ok := ValidateTokens(
         tokens, 
         {
-            {TokenStr}, 
+            {.Ident}, 
             {.Colon}
         }
-    ); !succ do return 
-
-    label = Label(tokens[0].(string))
-    DiscardTokens(tokens, 2)
-    return
+    ); ok {
+        label := Label(tokens[0].data.(string))
+        DiscardTokens(tokens, matches)
+        return label, true
+    }
+    return {}, false
 }
 
-ParseCall :: proc(tokens: ^[dynamic]Token) -> (call: Call, succ: bool) {
-    if succ = ValidateTokens(
+ParseCall :: proc(tokens: ^[dynamic]Token) -> (Call, bool) {
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.Call}, 
-            {TokenStr}
+            {.Ident}
         }
-    ); !succ do return 
-
-    call = Call(tokens[1].(string))
-    DiscardTokens(tokens, 2)
-    return
+    ); ok {
+        call := Call(tokens[1].data.(string))
+        DiscardTokens(tokens, matches)
+        return call, true
+    }
+    return {}, false
 }
 
-ParseReturn :: proc(tokens: ^[dynamic]Token) -> (ret: Return, succ: bool) {
-    if succ = ValidateTokens(
+ParseReturn :: proc(tokens: ^[dynamic]Token) -> (Return, bool) {
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.Ret}
         }
-    ); !succ do return 
-
-    ret = Return(tokens[0].(TokenKind))
-    DiscardTokens(tokens, 1)
-    return
+    ); ok {
+        ret := Return(tokens[0].kind)
+        DiscardTokens(tokens, matches)
+        return ret, true
+    }
+    return {}, false
 }
 
-ParsePrint :: proc(tokens: ^[dynamic]Token) -> (amount: Print, succ: bool) {
-    if succ = ValidateTokens(
+ParsePrint :: proc(tokens: ^[dynamic]Token) -> (Print, bool) {
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.Print}, 
-            {TokenInt}
+            {.IntLit}
         }
-    ); !succ do return 
-
-    amount = Print(tokens[1].(int))
-    DiscardTokens(tokens, 2)
-    return
+    ); ok {
+        amount := Print(tokens[1].data.(int))
+        DiscardTokens(tokens, matches)
+        return amount, true
+    } 
+    return {}, false
 }
 
-ParseRawPrint :: proc(tokens: ^[dynamic]Token) -> (amount: RawPrint, succ: bool) {
-    if succ = ValidateTokens(
+ParseRawPrint :: proc(tokens: ^[dynamic]Token) -> (RawPrint, bool) {
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.RawPrint}, 
-            {TokenInt}
+            {.IntLit}
         }
-    ); !succ do return 
-
-    amount = RawPrint(tokens[1].(int))
-    DiscardTokens(tokens, 2)
-    return
+    ); ok {
+        amount := RawPrint(tokens[1].data.(int))
+        DiscardTokens(tokens, matches)
+        return amount, true
+    }
+    return {}, false
 }
 
 ParseAssign :: proc(tokens: ^[dynamic]Token) -> (assign: Assign, succ: bool) {
-    if succ = ValidateTokens(
+    if matches, ok := ValidateTokens(
         tokens, 
         {
-            {TokenStr}, 
+            {.Ident}, 
             {.Assign}, 
-            {TokenStr, TokenInt}, 
+            {.Ident, .IntLit}, 
         }
-    ); !succ do return 
+    ); ok {
+        succ = true
+        assign.target = tokens[0].data.(string)
+        assign.left   = GetTokenData(tokens[2]) 
+        DiscardTokens(tokens, matches)
 
-    assign.target = tokens[0].(string)
-    assign.left   = GetString_OrInt(tokens[2]) 
-    DiscardTokens(tokens, 3)
-
-    if ValidateTokens(
-        tokens, 
-        {
-            {.Add, .Sub, .Mul, .Div}, 
-            {TokenStr, TokenInt},
-        },
-    ) {
-        assign.op     = tokens[0].(TokenKind)
-        assign.right  = GetString_OrInt(tokens[1]) 
-        DiscardTokens(tokens, 2)
+        if matches, ok := ValidateTokens(
+            tokens, 
+            {
+                {.Add, .Sub, .Mul, .Div}, 
+                {.Ident, .IntLit},
+            },
+        ); ok {
+            assign.op     = tokens[0].kind
+            assign.right  = GetTokenData(tokens[1]) 
+            DiscardTokens(tokens, matches)
+        }
     }
     return
 }
 
 ParseStackOp :: proc(tokens: ^[dynamic]Token) -> (stackop: StackOp, succ: bool) {
-    if succ = ValidateTokens(
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.Push, .Pop},
-            {TokenInt, TokenStr}
+            {.IntLit, .Ident}
         }
-    ); !succ do return 
+    ); ok {
+        succ = true
+        stackop.kind = tokens[0].kind
+        operands: [dynamic]union{string, int}
+        append(&operands, GetTokenData(tokens[1]))
+        DiscardTokens(tokens, matches)
+    
+        loop: for {
+            if matches, ok := ValidateTokens(
+                tokens,
+                {
+                    {.Comma},
+                    {.IntLit, .Ident}
+                }
+            ); ok {
+                append(&operands, GetTokenData(tokens[1]))
+                DiscardTokens(tokens, matches) 
+            } else {
+                break loop
+            }
+        }
 
-    stackop.kind = tokens[0].(TokenKind)
-    operands: [dynamic]union{string, int}
-    // python-like oneliner, sorry (you must pop a value into somewhere, `pop 12` is not valid)
-    if stackop.kind == .Pop do if name, ok := tokens[1].(string); !ok { stackop = {}; succ = false; return }
-    append(&operands, GetString_OrInt(tokens[1]))
-    DiscardTokens(tokens, 2)
-
-    for stackop.kind == .Push && ValidateTokens(tokens, {{.Comma}, {TokenStr, TokenInt}}) {
-        append(&operands, GetString_OrInt(tokens[1]))
-        DiscardTokens(tokens, 2)
-    } 
-    stackop.operands = operands[:len(operands)]
+        stackop.operands = operands[:]
+    }
     return
 }
 
 ParseGoto :: proc(tokens: ^[dynamic]Token) -> (goto: Goto, succ: bool) {
-    if succ = ValidateTokens(
+    if matches, ok := ValidateTokens(
         tokens, 
         {
             {.Goto},
-            {TokenStr},
+            {.Ident},
         }
-    ); !succ do return 
+    ); ok {
+        succ = true
+        goto.dest = GetTokenData(tokens[1]).(string)
+        DiscardTokens(tokens, matches)
 
-    goto.dest = tokens[1].(string)
-    DiscardTokens(tokens, 2)
-
-    if ValidateTokens(
-        tokens,
-        {
-            {.Branch},
-            {TokenStr, TokenInt},
-            {.Eq, .NotEq, .Lt, .Gt, .LtEq, .GtEq},
-            {TokenStr, TokenInt},
-        },
-    ) {
-        goto.branching = true
-        goto.left      = GetString_OrInt(tokens[1])
-        goto.comp      = tokens[2].(TokenKind)
-        goto.right     = GetString_OrInt(tokens[3])
-        DiscardTokens(tokens, 4) 
+        if matches, ok := ValidateTokens(
+            tokens,
+            {
+                {.Branch},
+                {.Ident, .IntLit},
+                {.Eq, .NotEq, .Lt, .Gt, .LtEq, .GtEq},
+                {.Ident, .IntLit},
+            },
+        ); ok {
+            goto.branching = true
+            goto.left      = GetTokenData(tokens[1])
+            goto.comp      = tokens[2].kind
+            goto.right     = GetTokenData(tokens[3])
+            DiscardTokens(tokens, matches) 
+        }
     }
     return
 }

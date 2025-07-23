@@ -9,11 +9,11 @@ TokenKind :: enum {
     Invalid, Entry, Comment, Name, Colon, Assign, 
     Add, Sub, Mul, Div, Push, Pop, Comma, Goto,
     Branch, Ret, Call, Eq, NotEq, Lt, Gt, LtEq, 
-    GtEq, Print, RawPrint, EndLine,
+    GtEq, Print, RawPrint, EndLine, IntLit, Ident
 } 
-Token :: union { TokenKind, string, int }
+Token :: struct { kind: TokenKind, data: union { string, int } }
 
-MatchKeyword :: proc(input: []u8) -> Token {
+MatchKeyword :: proc(input: []u8) -> TokenKind {
     s := string(input)
 
     match :: proc(input: string, keyword: string) -> bool 
@@ -33,7 +33,7 @@ MatchKeyword :: proc(input: []u8) -> Token {
     return .Invalid
 }
 
-MatchDoubleChar :: proc(c1: u8, c2: u8) -> Token {
+MatchDoubleChar :: proc(c1: u8, c2: u8) -> TokenKind {
     switch { 
         case c1 == '/' && c2 == '/': return .Comment
         case c1 == '=' && c2 == '=': return .Eq
@@ -44,7 +44,7 @@ MatchDoubleChar :: proc(c1: u8, c2: u8) -> Token {
     return .Invalid
 }
 
-MatchChar :: proc(c: u8) -> Token {
+MatchChar :: proc(c: u8) -> TokenKind {
     switch {
         case c == ':':  return .Colon
         case c == '=':  return .Assign
@@ -79,8 +79,7 @@ Alphanumeric :: proc(c: rune) -> bool {
 }
 
 EndLine :: proc(c: rune) -> bool { 
-    if c == '\n' do return false
-    return true
+    return c != '\n'
 }
 
 Tokenize :: proc(input: []u8, tokens: ^[dynamic]Token) {
@@ -96,42 +95,42 @@ Tokenize :: proc(input: []u8, tokens: ^[dynamic]Token) {
         case unicode.is_white_space(x):
             Tokenize(xs, tokens)
 
-        case unicode.is_lower(x) || x == '_':
+        case unicode.is_letter(x) || x == '_':
             word := Span(input, Alphanumeric)
             keyword := MatchKeyword(word)
             if keyword != .Invalid {
-                append(tokens, keyword)
+                append(tokens, Token { keyword, nil })
                 Tokenize(advance(input, len(word)), tokens)
             } else {
-                append(tokens, string(word))
+                append(tokens, Token { .Ident, string(word) })
                 Tokenize(advance(input, len(word)), tokens)
             }
 
         case unicode.is_digit(x):
             int_literal := Span(input, unicode.is_digit)
-            token := strconv.atoi(string(int_literal))
-            append(tokens, token)
+            num := strconv.atoi(string(int_literal))
+            append(tokens, Token { .IntLit, num })
             Tokenize(advance(input, len(int_literal)), tokens)
 
         case lookahead != 0:
-            token := MatchDoubleChar(u8(x), lookahead)
-            if token != .Invalid {
-                if token == .Comment {
+            kind := MatchDoubleChar(u8(x), lookahead)
+            if kind != .Invalid {
+                if kind == .Comment {
                     // skip to the end of the line
                     span := len(Span(input, EndLine)) + 1 // add one to account for newline
                     Tokenize(advance(input, span), tokens) 
                     return
                 }
-                append(tokens, token)
+                append(tokens, Token { kind, nil })
                 Tokenize(advance(input, 2), tokens)
                 return
             }
             fallthrough
 
         case:
-            token := MatchChar(u8(x))
-            if token == .Invalid do fmt.println("unexpected char %r ~", x)
-            append(tokens, token)
+            kind := MatchChar(u8(x))
+            if kind == .Invalid do fmt.printfln("unexpected char: %r", x)
+            append(tokens, Token { kind, nil })
             Tokenize(xs, tokens)
     }
 }

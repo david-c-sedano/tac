@@ -71,8 +71,14 @@ EvalTac :: proc(code: []Stat) {
                 case .Push:
                     for operand in variant.operands do append(&stack, GetValue(operand, &table))
                 case .Pop:
-                    operand := variant.operands[0]
-                    table[operand.(string)] = pop(&stack)
+                    for operand in variant.operands {
+                        switch v in operand {
+                        case int:
+                            for _ in 0..<v do pop(&stack)
+                        case string:
+                            table[v] = pop(&stack)
+                        }
+                    }
             } 
         case Goto:
             if !variant.branching {

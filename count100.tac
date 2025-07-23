@@ -1,4 +1,3 @@
-call main
 main:
     i = 0
 loop_start:
